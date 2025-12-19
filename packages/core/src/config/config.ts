@@ -124,6 +124,7 @@ export interface TelemetrySettings {
 
 export interface OutputSettings {
   format?: OutputFormat;
+  schema?: unknown;
 }
 
 export interface CodebaseInvestigatorSettings {
@@ -1501,6 +1502,10 @@ export class Config {
     return this.outputSettings?.format
       ? this.outputSettings.format
       : OutputFormat.TEXT;
+  }
+
+  getOutputSchema(): unknown {
+    return this.outputSettings?.schema;
   }
 
   async getGitService(): Promise<GitService> {

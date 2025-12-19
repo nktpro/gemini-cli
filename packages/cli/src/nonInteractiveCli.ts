@@ -28,6 +28,7 @@ import {
   CoreEvent,
   createWorkingStdio,
   recordToolCallInteractions,
+  SchemaValidator,
 } from '@google/gemini-cli-core';
 
 import type { Content, Part } from '@google/genai';
@@ -431,6 +432,18 @@ export async function runNonInteractive({
           } else if (config.getOutputFormat() === OutputFormat.JSON) {
             const formatter = new JsonFormatter();
             const stats = uiTelemetryService.getMetrics();
+            const outputSchema = config.getOutputSchema();
+
+            if (outputSchema) {
+              const validationError = SchemaValidator.validate(outputSchema, {
+                response: responseText,
+                stats,
+              });
+              if (validationError) {
+                throw new Error(`Output validation failed: ${validationError}`);
+              }
+            }
+
             textOutput.write(
               formatter.format(config.getSessionId(), responseText, stats),
             );

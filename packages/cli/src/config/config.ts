@@ -73,6 +73,7 @@ export interface CliArgs {
   useSmartEdit: boolean | undefined;
   useWriteTodos: boolean | undefined;
   outputFormat: string | undefined;
+  outputSchema: string | undefined;
   fakeResponses: string | undefined;
   recordResponses: string | undefined;
 }
@@ -229,6 +230,11 @@ export async function parseArguments(settings: Settings): Promise<CliArgs> {
           description: 'The format of the CLI output.',
           choices: ['text', 'json', 'stream-json'],
         })
+        .option('output-schema', {
+          type: 'string',
+          nargs: 1,
+          description: 'JSON schema to validate the CLI response output',
+        })
         .option('fake-responses', {
           type: 'string',
           description: 'Path to a file with fake model responses for testing.',
@@ -275,6 +281,13 @@ export async function parseArguments(settings: Settings): Promise<CliArgs> {
         )
       ) {
         return `Invalid values:\n  Argument: output-format, Given: "${argv['outputFormat']}", Choices: "text", "json", "stream-json"`;
+      }
+      if (argv['outputSchema']) {
+        try {
+          JSON.parse(argv['outputSchema'] as string);
+        } catch (e) {
+          return `Invalid JSON schema: ${e instanceof Error ? e.message : String(e)}`;
+        }
       }
       return true;
     });
@@ -665,6 +678,7 @@ export async function loadCliConfig(
     useWriteTodos: argv.useWriteTodos ?? settings.useWriteTodos,
     output: {
       format: (argv.outputFormat ?? settings.output?.format) as OutputFormat,
+      schema: argv.outputSchema ? JSON.parse(argv.outputSchema) : undefined,
     },
     enableMessageBusIntegration,
     codebaseInvestigatorSettings:

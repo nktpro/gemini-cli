@@ -168,6 +168,7 @@ describe('runNonInteractive', () => {
       getContentGeneratorConfig: vi.fn().mockReturnValue({}),
       getDebugMode: vi.fn().mockReturnValue(false),
       getOutputFormat: vi.fn().mockReturnValue('text'),
+      getOutputSchema: vi.fn().mockReturnValue(undefined),
       getModel: vi.fn().mockReturnValue('test-model'),
       getFolderTrust: vi.fn().mockReturnValue(false),
       isTrustedFolder: vi.fn().mockReturnValue(false),
@@ -1751,5 +1752,171 @@ describe('runNonInteractive', () => {
       ),
     );
     expect(getWrittenOutput()).toContain('Done');
+  });
+
+  describe('Output schema validation', () => {
+    it('should validate output against provided JSON schema and pass', async () => {
+      const events: ServerGeminiStreamEvent[] = [
+        { type: GeminiEventType.Content, value: 'Hello World' },
+        {
+          type: GeminiEventType.Finished,
+          value: { reason: undefined, usageMetadata: { totalTokenCount: 10 } },
+        },
+      ];
+      mockGeminiClient.sendMessageStream.mockReturnValue(
+        createStreamFromEvents(events),
+      );
+      vi.mocked(mockConfig.getOutputFormat).mockReturnValue(OutputFormat.JSON);
+      vi.mocked(uiTelemetryService.getMetrics).mockReturnValue(
+        MOCK_SESSION_METRICS,
+      );
+
+      // Add valid schema
+      const validSchema = {
+        type: 'object',
+        properties: {
+          response: { type: 'string' },
+          stats: { type: 'object' },
+        },
+        required: ['response', 'stats'],
+      };
+      vi.mocked(mockConfig.getOutputSchema).mockReturnValue(validSchema);
+
+      await runNonInteractive({
+        config: mockConfig,
+        settings: mockSettings,
+        input: 'Test input',
+        prompt_id: 'prompt-id-schema-valid',
+      });
+
+      // Should write output successfully
+      expect(processStdoutSpy).toHaveBeenCalledWith(
+        JSON.stringify(
+          {
+            session_id: 'test-session-id',
+            response: 'Hello World',
+            stats: MOCK_SESSION_METRICS,
+          },
+          null,
+          2,
+        ),
+      );
+    });
+
+    it('should fail validation when output does not match schema', async () => {
+      const events: ServerGeminiStreamEvent[] = [
+        { type: GeminiEventType.Content, value: 'Hello World' },
+        {
+          type: GeminiEventType.Finished,
+          value: { reason: undefined, usageMetadata: { totalTokenCount: 10 } },
+        },
+      ];
+      mockGeminiClient.sendMessageStream.mockReturnValue(
+        createStreamFromEvents(events),
+      );
+      vi.mocked(mockConfig.getOutputFormat).mockReturnValue(OutputFormat.JSON);
+      vi.mocked(uiTelemetryService.getMetrics).mockReturnValue(
+        MOCK_SESSION_METRICS,
+      );
+
+      // Add schema that requires a field that won't be present
+      const invalidSchema = {
+        type: 'object',
+        properties: {
+          response: { type: 'string' },
+          stats: { type: 'object' },
+          requiredField: { type: 'string' },
+        },
+        required: ['response', 'stats', 'requiredField'],
+      };
+      vi.mocked(mockConfig.getOutputSchema).mockReturnValue(invalidSchema);
+
+      await expect(
+        runNonInteractive({
+          config: mockConfig,
+          settings: mockSettings,
+          input: 'Test input',
+          prompt_id: 'prompt-id-schema-invalid',
+        }),
+      ).rejects.toThrow(/process\.exit\(1\) called/);
+
+      // Verify error was written
+      expect(processStderrSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Output validation failed'),
+      );
+    });
+
+    it('should skip validation when no schema is provided', async () => {
+      const events: ServerGeminiStreamEvent[] = [
+        { type: GeminiEventType.Content, value: 'Hello World' },
+        {
+          type: GeminiEventType.Finished,
+          value: { reason: undefined, usageMetadata: { totalTokenCount: 10 } },
+        },
+      ];
+      mockGeminiClient.sendMessageStream.mockReturnValue(
+        createStreamFromEvents(events),
+      );
+      vi.mocked(mockConfig.getOutputFormat).mockReturnValue(OutputFormat.JSON);
+      vi.mocked(uiTelemetryService.getMetrics).mockReturnValue(
+        MOCK_SESSION_METRICS,
+      );
+
+      // No schema provided
+      vi.mocked(mockConfig.getOutputSchema).mockReturnValue(undefined);
+
+      await runNonInteractive({
+        config: mockConfig,
+        settings: mockSettings,
+        input: 'Test input',
+        prompt_id: 'prompt-id-no-schema',
+      });
+
+      // Should write output successfully without validation
+      expect(processStdoutSpy).toHaveBeenCalledWith(
+        JSON.stringify(
+          {
+            session_id: 'test-session-id',
+            response: 'Hello World',
+            stats: MOCK_SESSION_METRICS,
+          },
+          null,
+          2,
+        ),
+      );
+    });
+
+    it('should only validate when output format is JSON', async () => {
+      const events: ServerGeminiStreamEvent[] = [
+        { type: GeminiEventType.Content, value: 'Hello World' },
+        {
+          type: GeminiEventType.Finished,
+          value: { reason: undefined, usageMetadata: { totalTokenCount: 10 } },
+        },
+      ];
+      mockGeminiClient.sendMessageStream.mockReturnValue(
+        createStreamFromEvents(events),
+      );
+      vi.mocked(mockConfig.getOutputFormat).mockReturnValue(OutputFormat.TEXT);
+
+      // Even with a schema, it shouldn't validate for TEXT output
+      const schema = {
+        type: 'object',
+        properties: {
+          response: { type: 'string' },
+        },
+      };
+      vi.mocked(mockConfig.getOutputSchema).mockReturnValue(schema);
+
+      await runNonInteractive({
+        config: mockConfig,
+        settings: mockSettings,
+        input: 'Test input',
+        prompt_id: 'prompt-id-text-output',
+      });
+
+      // Should write text output without validation
+      expect(getWrittenOutput()).toBe('Hello World\n');
+    });
   });
 });
